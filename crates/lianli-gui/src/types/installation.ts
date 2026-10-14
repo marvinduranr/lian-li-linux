@@ -1,3 +1,5 @@
+import type { UiMessage } from "@/utils/backendText";
+
 export type CheckState = "passed" | "failed" | "unavailable" | "not_applicable";
 export type InstallationGuide = "usb_permissions" | "service_modes" | "distrobox" | "troubleshooting";
 
@@ -11,6 +13,8 @@ export interface InstallationFinding {
   evidence: string;
   remediation: string;
   guide: InstallationGuide;
+  message_key?: string | null;
+  message_params?: Record<string, string>;
 }
 
 export interface InstallationReport {
@@ -21,7 +25,7 @@ export interface InstallationReport {
   services?: ServiceReport | null;
 }
 
-export type ServiceProbe<T> = { state: "known"; value: T } | { state: "unavailable"; reason: string };
+export type ServiceProbe<T> = { state: "known"; value: T } | { state: "unavailable"; reason: string; reason_ui?: UiMessage | null };
 
 export interface UnitState {
   name: string;
@@ -47,6 +51,7 @@ export type ServiceAction = "start" | "stop" | "restart";
 export interface ServiceOperationStatus {
   active: boolean;
   message: string;
+  message_ui?: UiMessage | null;
   success: boolean | null;
 }
 

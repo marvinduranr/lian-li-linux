@@ -218,6 +218,77 @@
           "sha256": "bed7a9b44078b609b540179cf3665dff1fc22c8527b730dfa3d5ba3b89c0bcce"
         }
       ]
+    },
+    {
+      "id": "cyber-rain-horizontal",
+      "name": "Cyber Rain / Mustard",
+      "description": "Bright rainy cyberpunk dashboard with analog CPU/GPU and network gauges, RAM, free disk space and NVMe temperature.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.0",
+      "folder": "cyber-rain-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "09bf0d27f7847180e4f07fdc3baa679ac566d3bd5f093ccaff1d5cdcb619f7ea",
+      "preview": "preview.jpg",
+      "preview_sha256": "0e33903e0d3621ef827dca6c34070cb875d345e838e2ec5ad117756b3e1ca976",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "05f3798121f5a595cbe255000ca40f9e2bc8ea59558b8bada788d37f3adc0c46"
+        },
+        {
+          "path": "JetBrainsMono-Bold.ttf",
+          "sha256": "d22c4f3821d725eb01210d278d95dfcfcaadc34699a06658d47c8a5cc5830ada"
+        },
+        {
+          "path": "JetBrainsMono-OFL.txt",
+          "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+        },
+        {
+          "path": "README.md",
+          "sha256": "6b7521d2eb9bb12810012a5e9d7b0187bdfb7e9a0cc950fde825dc10d23c0bf1"
+        },
+        {
+          "path": "Rajdhani-OFL.txt",
+          "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+        },
+        {
+          "path": "Rajdhani-SemiBold.ttf",
+          "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da"
+        },
+        {
+          "path": "panels.png",
+          "sha256": "c886d5704a1f0d773c141fc242f96080992c10b6b05f499b141ece535354b265"
+        },
+        {
+          "path": "rain-city.png",
+          "sha256": "e8f378cd5662a86b853ac608522a9aedbbe26b8b6f89b1ea3eb6a8aeeda286cf"
+        }
+      ]
+    },
+    {
+      "id": "maneki-neko-horizontal",
+      "name": "Maneki Neko / Ivory",
+      "description": "Light ivory lucky-cat dashboard with CPU/GPU temperature and load bars, RAM usage and a seconds clock.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.1.6",
+      "folder": "maneki-neko-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "45b392edea4ad8e7e744d18e92b25694369e3464e60d287d0a0538c9cb3491dc",
+      "preview": "preview.png",
+      "preview_sha256": "3143cb9cdc8ffb5cd7eb0f801573eb03a0d59596caddc18d94bba6d194ea8d20",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        { "path": "background.png", "sha256": "ab27c265143d3bad98bf21ad4d55d4cf2ebb5a98771e647b58bff67a81751653" },
+        { "path": "maneki-neko.png", "sha256": "3fab58644f8b07be4f6c1079a7397b9bb248a9a72f0c374baa26c5f70fd2eceb" },
+        { "path": "Lato-Heavy.ttf", "sha256": "4ce7ec20cd9c391b271b4149ad8cf5a71301d98965403f14fc5530d017146dbb" },
+        { "path": "Lato-OFL.txt", "sha256": "ea02980578560b53a6853c0846e411978e171132e336e8baf2c1a71e9e0eb94b" },
+        { "path": "CREDITS.md", "sha256": "68bc81a2bfac3094f921087dd0cdfaea3ac51a00bbb8153e82a5a28d06df5492" }
+      ]
     }
   ]
 }

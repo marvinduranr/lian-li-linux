@@ -1,10 +1,13 @@
 use crate::command::{self, Output};
+use crate::ui_text::keyed;
 use anyhow::{bail, ensure, Context, Result};
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationContext, InstallationFinding,
+    InstallationGuide,
 };
 use lianli_shared::services::{ServiceProbe, ServiceReport, UnitState, SYSTEM_UNIT, USER_UNIT};
-use std::collections::HashMap;
+use lianli_shared::ui_message::{ui_message_of, UiError, UiMessage};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
@@ -30,18 +33,27 @@ impl Route {
         match context {
             InstallationContext::Native => Ok(Self::Native),
             InstallationContext::UnsupportedContainer => {
-                bail!("Host service access is unavailable in this container")
+                bail!(keyed(
+                    "control.route.unsupportedContainer",
+                    "Host service access is unavailable in this container"
+                ))
             }
             InstallationContext::Distrobox { .. } => {
-                let executable = host_spawn_bridge()
-                    .context("Run distrobox-host-exec true interactively inside this box to install host-spawn, then Recheck. No helper is installed by this check.")?;
+                let executable = host_spawn_bridge().ok_or_else(|| keyed("control.route.hostSpawnMissing", "Run distrobox-host-exec true interactively inside this box to install host-spawn, then Recheck. No helper is installed by this check."))?;
                 let uid = unsafe { libc::geteuid() };
                 let bus = PathBuf::from(format!("/run/host/run/user/{uid}/bus"));
-                let metadata = fs::symlink_metadata(&bus)
-                    .context("The host user's session bus is not visible in this box")?;
+                let metadata = fs::symlink_metadata(&bus).map_err(|error| {
+                    UiError::new(
+                        UiMessage::new("control.route.busHidden").param("error", &error),
+                        format!("The host user's session bus is not visible in this box: {error}"),
+                    )
+                })?;
                 ensure!(
                     metadata.file_type().is_socket() && metadata.uid() == uid,
-                    "The visible host session bus does not belong to this user"
+                    keyed(
+                        "control.route.busForeign",
+                        "The visible host session bus does not belong to this user"
+                    )
                 );
                 for name in ["systemctl", "timeout"] {
                     let path = format!("/run/host/usr/bin/{name}");
@@ -49,7 +61,10 @@ impl Route {
                         fs::metadata(&path).is_ok_and(
                             |metadata| metadata.is_file() && metadata.mode() & 0o111 != 0
                         ),
-                        "Host /usr/bin/{name} is unavailable. Service checks cannot run safely"
+                        UiError::new(
+                            UiMessage::new("control.route.hostToolMissing").param("name", name),
+                            format!("Host /usr/bin/{name} is unavailable. Service checks cannot run safely"),
+                        )
                     );
                 }
                 Ok(Self::Host { executable, bus })
@@ -128,7 +143,11 @@ impl Route {
             limit,
         )?;
         if matches!(self, Self::Host { .. }) && output.status.code() == Some(127) {
-            bail!("Host command bridge failed: {}. Verify the host's Flatpak session helper and the box's host session-bus access.", command_error(&output));
+            let error = command_error(&output);
+            bail!(UiError::new(
+                UiMessage::new("control.route.bridgeFailed").param("error", &error),
+                format!("Host command bridge failed: {error}. Verify the host's Flatpak session helper and the box's host session-bus access.")
+            ));
         }
         Ok(output)
     }
@@ -206,27 +225,19 @@ fn existing_bridge(path: &Path) -> Result<()> {
 
 pub fn inspect(context: &InstallationContext) -> ServiceReport {
     let route = Route::detect(context);
-    let unavailable = || ServiceProbe::Unavailable {
-        reason: format!("{:#}", route.as_ref().err().unwrap()),
-    };
-    let Ok(route) = route.as_ref() else {
-        return ServiceReport {
-            context: context.clone(),
-            user: unavailable(),
-            system: unavailable(),
-            global_user: ServiceProbe::Unavailable {
-                reason: format!("{:#}", route.as_ref().err().unwrap()),
-            },
-            ownership: Some(ServiceProbe::Unavailable {
-                reason: format!("{:#}", route.as_ref().err().unwrap()),
-            }),
-            operation_lock: Some(ServiceProbe::Unavailable {
-                reason: format!("{:#}", route.as_ref().err().unwrap()),
-            }),
-            selection: Some(ServiceProbe::Unavailable {
-                reason: format!("{:#}", route.as_ref().err().unwrap()),
-            }),
-        };
+    let route = match &route {
+        Ok(route) => route,
+        Err(error) => {
+            return ServiceReport {
+                context: context.clone(),
+                user: unavailable(error),
+                system: unavailable(error),
+                global_user: unavailable(error),
+                ownership: Some(unavailable(error)),
+                operation_lock: Some(unavailable(error)),
+                selection: Some(unavailable(error)),
+            }
+        }
     };
     let unit = |scope, name| {
         probe(|| {
@@ -308,7 +319,10 @@ pub fn inspect(context: &InstallationContext) -> ServiceReport {
                 let current = crate::ownership::inspect(context, route)?;
                 ensure!(
                     current.identity == value.identity && current.owner_pid == Some(pid),
-                    "Hardware owner changed during process inspection. Recheck services"
+                    keyed(
+                        "control.route.ownerChanged",
+                        "Hardware owner changed during process inspection. Recheck services"
+                    )
                 );
                 Ok(process)
             }));
@@ -338,6 +352,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
                 title: "Service switching needs host support".into(), evidence: format!("{error:#}"),
                 remediation: "Install the matching host control helper, systemd-run and Polkit. For Distrobox, use Set up host support in Settings. Run a desktop authentication agent, then Recheck.".into(),
                 guide: InstallationGuide::ServiceModes,
+                message_key: Some("control.switchPrerequisites".into()), message_params: BTreeMap::new(),
             });
         }
     }
@@ -351,12 +366,13 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
     } else {
         "Host via container bridge"
     };
-    if let Some(ServiceProbe::Unavailable { reason }) = &report.selection {
+    if let Some(ServiceProbe::Unavailable { reason, .. }) = &report.selection {
         findings.push(InstallationFinding {
             code: "service.selection".into(), state: CheckState::Unavailable,
             severity: FindingSeverity::Error, feature: "Service startup".into(), context: context.into(),
             title: "Host service selection is unverified".into(), evidence: reason.clone(),
             remediation: "Resolve any unfinished service switch before starting a daemon. For invalid or hidden selection records, follow the Service modes guide and preserve recovery files. Do not create a private container selection file.".into(), guide,
+            message_key: Some("control.serviceSelection".into()), message_params: BTreeMap::new(),
         });
     }
     if let ServiceProbe::Known { value } = &report.user {
@@ -371,53 +387,69 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             InstallationContext::Native => false,
         };
         if needs_recipe {
-            let remediation = match &report.context {
-                InstallationContext::Distrobox { name } => crate::distrobox_unit::guidance(name)
-                    .unwrap_or_else(|error| format!("{error:#}. Follow the Distrobox guide to select an existing box and update the host user unit.")),
-                _ => "Follow the Distrobox guide to update the host user unit, then reload the user manager. Keep both application binaries installed inside the same box. Stop an older daemon cleanly before changing its unit.".into(),
+            let (message_key, params, remediation) = match &report.context {
+                InstallationContext::Distrobox { name } => match crate::distrobox_unit::guidance(name) {
+                    Ok(guidance) => ("control.distroboxRecipe", message_params([("name", name.clone())]), guidance),
+                    Err(error) => ("control.distroboxRecipeInvalidBox", BTreeMap::new(),
+                        format!("{error:#}. Follow the Distrobox guide to select an existing box and update the host user unit.")),
+                },
+                _ => ("control.distroboxRecipeUnsupported", BTreeMap::new(), "Follow the Distrobox guide to update the host user unit, then reload the user manager. Keep both application binaries installed inside the same box. Stop an older daemon cleanly before changing its unit.".into()),
             };
             findings.push(InstallationFinding {
                 code: "service.distrobox_recipe".into(), state: CheckState::Failed,
                 severity: FindingSeverity::Warning, feature: "Service management".into(), context: context.into(),
                 title: "Distrobox service controls need the current service recipe".into(),
                 evidence: "The host user service is missing or does not have verified invocation-aware start and stop commands for this box.".into(),
-                remediation, guide,
+                remediation, guide, message_key: Some(message_key.into()), message_params: params,
             });
         }
     }
-    if let Some(ServiceProbe::Unavailable { reason }) = &report.operation_lock {
+    if let Some(ServiceProbe::Unavailable { reason, .. }) = &report.operation_lock {
         findings.push(InstallationFinding {
             code: "service.operation_lock".into(), state: CheckState::Unavailable,
             severity: FindingSeverity::Warning, feature: "Service management".into(),
             context: context.into(), title: "Service controls need the current host setup".into(),
             evidence: reason.clone(),
             remediation: "Install the current packaging/tmpfiles.d/lianli.conf on the host and run sudo systemd-tmpfiles --create lianli.conf, then Recheck.".into(), guide,
+            message_key: Some("control.operationLock".into()), message_params: BTreeMap::new(),
         });
     }
-    if let Some(ServiceProbe::Unavailable { reason }) = &report.ownership {
+    if let Some(ServiceProbe::Unavailable { reason, .. }) = &report.ownership {
         findings.push(InstallationFinding {
             code: "ownership.kernel".into(), state: CheckState::Unavailable, severity: FindingSeverity::Warning,
             feature: "Daemon ownership".into(), context: context.into(), title: "Kernel lock ownership is unverified".into(),
             evidence: reason.clone(), remediation: "Restore the shared host lock and host bridge before switching modes. A PID written in the file does not prove current ownership.".into(), guide,
+            message_key: Some("control.ownershipKernel".into()), message_params: BTreeMap::new(),
         });
     }
     if let Some(ServiceProbe::Known { value }) = &report.ownership {
-        if let Some(ServiceProbe::Unavailable { reason }) = &value.process {
+        if let Some(ServiceProbe::Unavailable { reason, .. }) = &value.process {
             findings.push(InstallationFinding {
                 code: "ownership.process".into(), state: CheckState::Unavailable,
                 severity: FindingSeverity::Warning, feature: "Daemon ownership".into(),
                 context: context.into(), title: "Hardware owner's service is unverified".into(),
                 evidence: reason.clone(),
                 remediation: "Recheck after startup or shutdown finishes. Service switching requires host process and service cgroup access. Do not stop a PID based on its number alone.".into(), guide,
+                message_key: Some("control.ownershipProcess".into()), message_params: BTreeMap::new(),
             });
         }
     }
-    for (code, title, probe) in [
-        ("service.user", "User hardware service", &report.user),
-        ("service.system", "System hardware service", &report.system),
+    for (code, message_key, title, probe) in [
+        (
+            "service.user",
+            "control.userService",
+            "User hardware service",
+            &report.user,
+        ),
+        (
+            "service.system",
+            "control.systemService",
+            "System hardware service",
+            &report.system,
+        ),
     ] {
         let (state, severity, evidence) = match probe {
-            ServiceProbe::Unavailable { reason } => (
+            ServiceProbe::Unavailable { reason, .. } => (
                 CheckState::Unavailable,
                 FindingSeverity::Warning,
                 reason.clone(),
@@ -482,11 +514,12 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             code: code.into(), state, severity, feature: "Service management".into(), context: context.into(),
             title: title.into(), evidence,
             remediation: "Check the host service setup and journal. Install the supplied units, then select one hardware mode. Do not start another daemon while an existing owner is running.".into(), guide,
+            message_key: Some(message_key.into()), message_params: BTreeMap::new(),
         });
     }
     let global_enabled = match &report.global_user {
         ServiceProbe::Known { value } => value == "enabled" || value == "enabled-runtime",
-        ServiceProbe::Unavailable { reason } => {
+        ServiceProbe::Unavailable { reason, .. } => {
             findings.push(InstallationFinding {
                 code: "service.global_user".into(),
                 state: CheckState::Unavailable,
@@ -499,6 +532,8 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
                     "Check global user-service enablement on the host before selecting system mode."
                         .into(),
                 guide,
+                message_key: Some("control.globalUserUnverified".into()),
+                message_params: BTreeMap::new(),
             });
             false
         }
@@ -518,6 +553,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             feature: "Daemon ownership".into(), context: context.into(), title: "Competing hardware service selections".into(),
             evidence: "Both hardware modes are active or selected for startup. The ownership lock prevents concurrent access, but competing services may keep retrying.".into(),
             remediation: "Choose one hardware service mode. Resolve global user enablement and manually launched owners before switching. Do not stop another user's daemon.".into(), guide,
+            message_key: Some("control.serviceConflict".into()), message_params: BTreeMap::new(),
         });
     } else if global_enabled {
         findings.push(InstallationFinding {
@@ -525,6 +561,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             feature: "Daemon ownership".into(), context: context.into(), title: "Hardware service enabled for every user".into(),
             evidence: "The host has global user-service enablement. Another login can start a competing hardware service.".into(),
             remediation: "Ask the administrator to disable the global default and select startup only for the intended user or the system service.".into(), guide,
+            message_key: Some("control.globalUserEnabled".into()), message_params: BTreeMap::new(),
         });
     }
     findings
@@ -533,9 +570,14 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
 fn probe<T>(query: impl FnOnce() -> Result<T>) -> ServiceProbe<T> {
     match query() {
         Ok(value) => ServiceProbe::Known { value },
-        Err(error) => ServiceProbe::Unavailable {
-            reason: format!("{error:#}"),
-        },
+        Err(error) => unavailable(&error),
+    }
+}
+
+fn unavailable<T>(error: &anyhow::Error) -> ServiceProbe<T> {
+    ServiceProbe::Unavailable {
+        reason: format!("{error:#}"),
+        reason_ui: ui_message_of(error),
     }
 }
 
@@ -941,6 +983,7 @@ mod tests {
             .any(|finding| finding.code == "service.conflict"));
         report.user = ServiceProbe::Unavailable {
             reason: "bus unavailable".into(),
+            reason_ui: None,
         };
         assert!(findings(&report)
             .iter()

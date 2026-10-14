@@ -4,6 +4,8 @@ use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::UiMessage;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -77,6 +79,7 @@ fn openrgb_finding(
         context:"Selected daemon".into(), title:"OpenRGB server".into(), evidence,
         remediation:"Free the configured TCP port or fix access in the daemon's network namespace. Use Retry OpenRGB in Settings to retry saved settings, or edit the port and Save. Recheck only reads status.".into(),
         guide:InstallationGuide::Troubleshooting,
+        message_key: Some("daemon.openrgbServer".into()), message_params: BTreeMap::new(),
     })
 }
 
@@ -92,7 +95,10 @@ pub(super) fn check(state: &SharedState) -> IpcResponse {
         )
     };
     let Some(backend) = backend else {
-        return IpcResponse::error("Runtime setup is still in progress. Recheck shortly");
+        return IpcResponse::error_ui(
+            "Runtime setup is still in progress. Recheck shortly",
+            UiMessage::new("daemon.installation.setupInProgress"),
+        );
     };
     if let Some((time, report)) = &*CACHE.lock().unwrap_or_else(|error| error.into_inner()) {
         if report.instance_id == instance_id && time.elapsed() < Duration::from_secs(2) {
@@ -103,8 +109,9 @@ pub(super) fn check(state: &SharedState) -> IpcResponse {
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "A runtime installation check is already running. Recheck shortly",
+            UiMessage::new("daemon.installation.checkRunning"),
         );
     }
     let _running = Running;
@@ -127,6 +134,7 @@ pub(super) fn check(state: &SharedState) -> IpcResponse {
         code: "runtime.unavailable".into(), state: CheckState::Unavailable, severity: FindingSeverity::Warning,
         feature: "Runtime installation checks".into(), context: "Selected daemon".into(), title: "Runtime helper unavailable".into(),
         evidence: format!("{error:#}"), remediation: "Install or rebuild the matching lianli-control beside the daemon. Repair unavailable storage or account services, then Recheck.".into(), guide: InstallationGuide::Troubleshooting,
+        message_key: Some("daemon.runtimeHelperUnavailable".into()), message_params: BTreeMap::new(),
     }]);
     {
         let state = state.lock();
@@ -210,12 +218,15 @@ mod tests {
                 device_id: "test".into(),
                 state: MediaPreparationState::Ready,
                 error: None,
+                error_ui: None,
                 last_playback_error: None,
+                last_playback_error_ui: None,
                 runtime: Some(MediaRuntimeStatus {
                     stage: MediaRuntimeStage::FrameSubmitted,
                     fps_limit: 20.0,
                     hardware_video_allowed: false,
                     fallback_reason: Some("H.264 encoder unavailable".into()),
+                    fallback_reason_ui: None,
                     encoder: None,
                     h264_transfer_started: None,
                 }),

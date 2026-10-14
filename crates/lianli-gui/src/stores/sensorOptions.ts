@@ -1,4 +1,5 @@
-import type { SensorInfo, SensorSource, SensorSourceConfig } from "@/types";
+import type { SensorCategory, SensorInfo, SensorSource, SensorSourceConfig } from "@/types";
+import { tr, type MessageKey } from "@/i18n";
 
 export interface SelectOption {
   label: string;
@@ -25,7 +26,7 @@ export function enumerateSensorsAsOptions(
     value: JSON.stringify(s.source),
   }));
   if (includeCommand) {
-    opts.push({ label: "Custom command", value: "command" });
+    opts.push({ label: tr("fans.sensorOptions.customCommand"), value: "command" });
   }
   return opts;
 }
@@ -38,7 +39,7 @@ export function sourceConfigsAsOptions(
     label: formatSensorLabel(s),
     value: JSON.stringify(sourceToConfig(s.source)),
   }));
-  if (includeCommand) options.push({ label: "Custom command", value: "command" });
+  if (includeCommand) options.push({ label: tr("fans.sensorOptions.customCommand"), value: "command" });
   return options;
 }
 
@@ -53,12 +54,12 @@ export function sourceToConfig(source: SensorSource | SensorSourceConfig): Senso
   }
 }
 
-function formatSensorLabel(s: SensorInfo): string {
+export function formatSensorLabel(s: SensorInfo): string {
   const unit = UNIT_LABELS[s.unit];
   if (s.display_name) {
     return unit ? `${s.display_name} (${unit})` : s.display_name;
   }
-  const sensor = s.sensor_name?.sensor_name ?? "sensor";
+  const sensor = s.sensor_name?.sensor_name ?? tr("fans.sensorOptions.sensorFallback");
   const device = s.sensor_name?.device_name;
   let name = device && device !== sensor ? `${device}: ${sensor}` : sensor;
   if (s.source?.type === "hwmon" && s.source.name && !name.includes(s.source.name)) {
@@ -131,7 +132,30 @@ export function optionForConfig(
   return sensor ? JSON.stringify(sensor.source) : "";
 }
 
-export function inferSensorCategory(src: SensorSourceConfig): string | null {
+export const SENSOR_CATEGORY_LABELS: Record<SensorCategory, MessageKey> = {
+  cpu_temp: "editor.sensorBinding.categories.cpuTemp",
+  gpu_temp: "editor.sensorBinding.categories.gpuTemp",
+  cpu_usage: "editor.sensorBinding.categories.cpuUsage",
+  gpu_usage: "editor.sensorBinding.categories.gpuUsage",
+  mem_usage: "editor.sensorBinding.categories.memUsage",
+  mem_used: "editor.sensorBinding.categories.memUsed",
+  mem_free: "editor.sensorBinding.categories.memFree",
+  network_rx: "editor.sensorBinding.categories.networkRx",
+  network_tx: "editor.sensorBinding.categories.networkTx",
+  disk_read: "editor.sensorBinding.categories.diskRead",
+  disk_write: "editor.sensorBinding.categories.diskWrite",
+};
+
+export function isSensorCategory(value: unknown): value is SensorCategory {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(SENSOR_CATEGORY_LABELS, value);
+}
+
+/** Compares source configs regardless of the key order they were serialized with. */
+export function sourceKey(config: SensorSourceConfig): string {
+  return JSON.stringify(config, Object.keys(config).sort());
+}
+
+export function inferSensorCategory(src: SensorSourceConfig): SensorCategory | null {
   switch (src.type) {
     case "cpu_usage":
       return "cpu_usage";
