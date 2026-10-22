@@ -10,7 +10,8 @@ fn failure(error: impl std::fmt::Display) -> CommandError {
 }
 
 #[tauri::command]
-pub async fn check_package_update() -> Result<lianli_control::app_update::PackageUpdate, CommandError> {
+pub async fn check_package_update(
+) -> Result<lianli_control::app_update::PackageUpdate, CommandError> {
     tauri::async_runtime::spawn_blocking(lianli_control::app_update::check)
         .await
         .map_err(failure)?

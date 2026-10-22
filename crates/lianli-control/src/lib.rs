@@ -1,6 +1,6 @@
 pub mod account;
-pub mod app_update;
 pub mod account_publication;
+pub mod app_update;
 pub mod authorized_service;
 pub mod automatic_recovery;
 pub mod command;
